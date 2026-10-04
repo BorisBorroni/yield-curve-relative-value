@@ -100,7 +100,7 @@ essere grande un mispricing per essere distinguibile dal rumore, e a vedere i fa
 vengono da `scripts/esegui_sintetico.py`.
 """),
     codice("""
-for nome in ("recupero", "falsi_positivi", "potere"):
+for nome in ("recupero", "falsi_positivi", "arrotondamento", "potere", "potere_arrotondato"):
     f = RADICE / "output" / f"sintetico_{nome}.csv"
     if f.exists():
         print(nome)
@@ -113,7 +113,8 @@ for nome in ("recupero", "falsi_positivi", "potere"):
 
 I punti del Tesoro sono costruiti con i soli titoli appena emessi; la curva della Fed li esclude. La differenza
 misura quanto costano di piu' i titoli nuovi (segno negativo = rendimento piu' basso). Il Tesoro ha cambiato
-metodo di costruzione il 6 dicembre 2021, quindi i periodi si leggono separati. Il t e' di Newey-West.
+metodo di costruzione il 6 dicembre 2021, quindi i periodi si leggono separati. Il t e' di Newey-West con 250
+ritardi, perche' le serie sono molto persistenti.
 """),
     codice("""
 premio = an.differenza_bp(par_t, par_f)
@@ -142,28 +143,31 @@ display(pd.DataFrame({"autocorrelazione a 1 giorno": {c: residui[c].autocorr(1) 
 ## 6. Componenti principali contro fattori, e previsione
 
 Le tre componenti principali delle variazioni giornaliere contro i tre fattori di Nelson-Siegel (livello,
-pendenza, curvatura con lambda di Diebold-Li). Poi la previsione fuori campione dei fattori: AR(1) contro
+pendenza, curvatura con il tau di Diebold-Li). Poi la previsione fuori campione dei fattori: AR(1) contro
 passeggiata casuale.
 """),
     codice("""
 completi = par_t.dropna()
-var, punteggi, _ = an.pca(completi.diff().dropna() * 100)
-fattori = an.fattori_dl(completi).diff().dropna()
+# le variazioni si calcolano con i buchi (30 anni assenti 2002-2006) e poi si scartano: niente "giorno" di 4 anni
+var, punteggi, _ = an.pca(par_t.diff().dropna() * 100)
+fattori = an.fattori_dl(completi).diff()
+fattori = fattori[par_t.diff().notna().all(axis=1).reindex(fattori.index).fillna(False)]
 display(pd.DataFrame({"varianza spiegata": var.round(3), "R2 sui 3 fattori": an.r2_su_fattori(punteggi, fattori).round(3).to_numpy()},
                      index=["PC1", "PC2", "PC3"]))
 righe = []
 for h in (1, 6, 12):
-    rm, dm, k = an.previsione_dl(completi, h, "2010-01-01")
+    rm, dm, k, cw = an.previsione_dl(completi, h, "2010-01-01")
     righe.append({"orizzonte (mesi)": h, "previsioni": k, "RMSE AR(1)": rm["AR(1)"].mean().round(1),
-                  "RMSE passeggiata casuale": rm["RW"].mean().round(1), "t Diebold-Mariano": dm})
+                  "RMSE passeggiata casuale": rm["RW"].mean().round(1), "t Diebold-Mariano": dm,
+                  "t Clark-West": cw})
 display(pd.DataFrame(righe).set_index("orizzonte (mesi)"))
 """),
     md("""
 ## 7. Farfalle
 
-La regola e' fissata prima: z-score su 60 giorni precedenti, soglia 1, posizione sul rientro. Farfalla 2-5-10
-con pesi DV01 (0.5, -1, 0.5) e neutrale ai fattori, con tre livelli di costo per gamba. Il guadagno e' in bp
-per unita' di DV01 al giorno.
+Regola: z-score su 60 giorni precedenti, soglia 1, posizione sul rientro. Farfalla 2-5-10 con pesi DV01
+(0.5, -1, 0.5) e neutrale ai fattori, con tre livelli di costo per gamba e due modi di eseguire: allo stesso
+prezzo che genera il segnale, oppure il giorno dopo. Il guadagno e' in bp per unita' di DV01 al giorno.
 """),
     codice("""
 righe = []
@@ -171,12 +175,14 @@ cum = None
 for neutr in ("dv01", "fattori"):
     w = sg.pesi_farfalla((2, 5, 10), neutr)
     x = sg.serie_farfalla(par_t, (2, 5, 10), w)
-    for costo in (0.0, 0.25, 0.5):
-        g, _ = sg.guadagni_serie(x.to_numpy(), x.to_numpy(), abs(w).sum(), 60, 1.0, costo)
-        righe.append({"neutralita": neutr, "costo (bp)": costo, "bp/giorno": g.mean().round(4), "bp/anno": (g.mean() * 252).round(1)})
+    for ritardo in (0, 1):
+        for costo in (0.0, 0.25, 0.5):
+            g, _ = sg.guadagni_serie(x.to_numpy(), x.to_numpy(), abs(w).sum(), 60, 1.0, costo, ritardo=ritardo)
+            righe.append({"neutralita": neutr, "esecuzione": "giorno dopo" if ritardo else "stesso giorno",
+                          "costo (bp)": costo, "bp/giorno": g.mean().round(4)})
     if neutr == "dv01":
         cum = grafici.guadagni_cumulati(x, abs(w).sum())
-display(pd.DataFrame(righe).set_index(["neutralita", "costo (bp)"]))
+display(pd.DataFrame(righe).set_index(["neutralita", "esecuzione", "costo (bp)"]))
 display(grafici.grafico_guadagni(cum, "Farfalla 2-5-10: guadagno cumulato della regola z-score"))
 """),
     md("""
@@ -189,10 +195,13 @@ si esegue: lo produce `python scripts/analisi_corrente.py`, che scarica i dati r
     md("""
 ## Conclusioni
 
-- Il residuo di Nelson-Siegel sui punti del Tesoro e' molto persistente: e' soprattutto errore di forma del
-  modello e rumore di costruzione dei punti, non mispricing che rientra.
-- La regola z-score guadagna al lordo, ma con un costo di circa 0.2 bp per unita' di DV01 il guadagno si azzera.
-- Il premio del titolo nuovo e' invece una caratteristica stabile e misurabile della curva.
+- Il residuo di Nelson-Siegel sui punti del Tesoro e' molto persistente. Un residuo stazionario e persistente
+  guadagna con questa regola anche senza alcun mispricing: il guadagno lordo reale va confrontato con quello,
+  non con zero (tabella nel README, sezione 9).
+- Con lo scambio il giorno dopo il segnale, il guadagno lordo cala molto e con un costo di 0.25 bp diventa
+  negativo per tutte le strategie provate.
+- Il premio del titolo nuovo e' negativo quasi ovunque, ma cambia nel tempo e in alcune scadenze e' poco
+  distinguibile da zero con errori standard prudenti.
 
 I limiti (punti interpolati, nessun prezzo eseguibile, costi ipotizzati) sono nel README.
 """),

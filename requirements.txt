@@ -2,3 +2,7 @@ numpy
 pandas
 scipy
 requests
+matplotlib
+nbformat
+nbclient
+ipykernel

@@ -1,7 +1,7 @@
 """Analisi della curva piu' recente: dove si trovano oggi residui e farfalle rispetto allo storico.
 
 Lo storico (data/storico/) e' fisso; i giorni successivi si scaricano a ogni esecuzione in
-data/corrente/ (cartella non versionata) e il calcolo e' rifatto da zero.
+data/corrente/ (cartella non versionata) e il calcolo dei giorni recenti e' rifatto a ogni esecuzione.
 """
 import numpy as np
 import pandas as pd
@@ -21,6 +21,8 @@ def anni_da_scaricare(oggi: pd.Timestamp) -> range:
 
 def percentile(valore: float, riferimento) -> float:
     """Quota (0-100) dei valori storici assoluti minori o uguali al valore assoluto dato."""
+    if np.isnan(valore):
+        return float("nan")
     r = np.abs(np.asarray(riferimento, dtype=float))
     r = r[~np.isnan(r)]
     return float(100 * np.mean(r <= abs(valore)))

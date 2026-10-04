@@ -2,13 +2,13 @@
 
 La curva vera ha fattori che seguono processi AR(1) giornalieri. A ogni scadenza si somma un
 mispricing OU (mean-reverting, con deviazione standard e emivita note) e un rumore di misura.
-Tutto in rendimenti (%), con mispricing e rumore dichiarati in punti base.
+Rendimenti in %, mispricing e rumore in punti base.
 
-Il rumore e' ERRORE DI MISURA (non e' un prezzo a cui si puo' operare): disturba il segnale ma
+Il rumore e' errore di misura (non e' un prezzo a cui si puo' operare): disturba il segnale ma
 i guadagni si calcolano sui prezzi senza rumore. Se invece si valutassero anche sul rumore, ogni
 rumore indipendente darebbe un guadagno "eseguibile" fasullo, perche' rientra da solo.
 
-La strategia di prova opera sul RESIDUO della curva adattata ogni giorno: e' un limite
+La strategia di prova opera sul residuo della curva adattata ogni giorno: e' un limite
 superiore per una vera strategia a farfalla, che deve anche coprirsi e pagare i costi su
 piu' gambe. Se non si vede nemmeno qui, non si vedra' nelle gambe reali.
 """
@@ -50,11 +50,14 @@ def genera_ou(giorni: int, colonne: int, std_bp: float, emivita: float, rng) -> 
     return m
 
 
-def genera_panel(giorni: int, std_bp: float, emivita: float, rumore_bp: float, rng, vero: str = "ns"):
+def genera_panel(giorni: int, std_bp: float, emivita: float, rumore_bp: float, rng, vero: str = "ns",
+                 risoluzione_bp: float = 0.0):
     """Restituisce (rendimenti osservati [giorni x scadenze] in %, mispricing in bp, rumore di misura in bp, beta veri).
 
     vero = "ns": la curva vera e' Nelson-Siegel (il modello e' corretto);
     vero = "svensson": ha una seconda gobba (quarto fattore AR(1), tau2 = 8) che Nelson-Siegel non sa descrivere.
+    risoluzione_bp > 0 arrotonda i rendimenti osservati a quel passo (i punti del Tesoro hanno due decimali,
+    cioe' 1 bp); l'errore di arrotondamento si somma al rumore di misura, perche' non e' negoziabile.
     """
     beta = genera_beta(giorni, rng)
     x = cv.carichi(SCADENZE, TAU_VERO)
@@ -70,45 +73,49 @@ def genera_panel(giorni: int, std_bp: float, emivita: float, rumore_bp: float, r
         raise ValueError("vero deve essere 'ns' o 'svensson'")
     mis = genera_ou(giorni, len(SCADENZE), std_bp, emivita, rng)
     rumore = rumore_bp * rng.standard_normal(y.shape)
-    return y + (mis + rumore) / 100, mis, rumore, beta
+    osservato = y + (mis + rumore) / 100
+    if risoluzione_bp > 0:
+        passo = risoluzione_bp / 100
+        arrotondato = np.round(osservato / passo) * passo
+        rumore = rumore + (arrotondato - osservato) * 100
+        osservato = arrotondato
+    return osservato, mis, rumore, beta
 
 
 def guadagni(residui_bp: np.ndarray, residui_eseguibili_bp: np.ndarray, finestra: int = 60,
-             soglia: float = 1.0, costo_bp: float = 0.0) -> np.ndarray:
+             soglia: float = 1.0, costo_bp: float = 0.0, ritardo: int = 0) -> np.ndarray:
     """Guadagno giornaliero medio (bp) sulle scadenze della strategia sul residuo.
 
-    Segnale: z = (residuo - media mobile) / dev. std mobile sui `finestra` giorni PRECEDENTI
-    (solo passato). Posizione al giorno t: +1 se z > soglia (residuo alto = titolo a
-    buon mercato: si compra), -1 se z < -soglia, 0 altrimenti. Guadagno al giorno t+1 =
-    posizione * (r_t - r_{t+1}) con r = residuo eseguibile (senza errore di misura); costo =
-    costo_bp per ogni variazione di una unita' di posizione.
-    """
-    pos = strategia.posizioni(residui_bp, finestra, soglia)
-    e = np.asarray(residui_eseguibili_bp, dtype=float)
-    lordo = pos[:-1] * (e[:-1] - e[1:])
-    cambi = np.abs(np.diff(pos, axis=0, prepend=0.0))[:-1]
-    return (lordo - costo_bp * cambi).mean(axis=1)
+    Il segnale e la regola sono quelli di strategia.guadagni_serie (z-score sui `finestra` giorni precedenti,
+    posizione +1 se z > soglia, -1 se z < -soglia, costo per ogni variazione di una unita' di posizione). Il
+    segnale si calcola sul residuo osservato (con l'errore di misura), il guadagno sul residuo eseguibile
+    (senza errore di misura)."""
+    g, _ = strategia.guadagni_serie(residui_bp, residui_eseguibili_bp, 1.0, finestra, soglia, costo_bp, ritardo=ritardo)
+    return g.mean(axis=1)
 
 
-def simula(giorni, std_bp, emivita, rumore_bp, seed, vero="ns", costo_bp=0.0, soglia=1.0, tau1=None, eseguibile=True):
+def simula(giorni, std_bp, emivita, rumore_bp, seed, vero="ns", costo_bp=0.0, soglia=1.0, tau1=None, eseguibile=True,
+           ritardo=0, risoluzione_bp=0.0):
     """Una simulazione completa: panel, fit giornaliero, strategia. Restituisce un dizionario.
 
-    eseguibile=False calcola i guadagni sui residui OSSERVATI, rumore di misura compreso: e' quello che si fa
-    sui dati reali, dove il rumore dei punti del Tesoro non si puo' separare. Serve da controllo nullo."""
+    eseguibile=False calcola i guadagni sui residui osservati, rumore di misura compreso: e' quello che si fa
+    sui dati reali, dove il rumore dei punti del Tesoro non si puo' separare. Serve a misurare quanto guadagno fasullo producono rumore ed errore di modello."""
     rng = np.random.default_rng(seed)
-    y, mis, rumore, _ = genera_panel(giorni, std_bp, emivita, rumore_bp, rng, vero)
+    y, mis, rumore, _ = genera_panel(giorni, std_bp, emivita, rumore_bp, rng, vero, risoluzione_bp)
     beta, tau, res = cv.residui_panel(y, SCADENZE, tau1=tau1)
     res_bp = res * 100
-    g = guadagni(res_bp, res_bp - rumore if eseguibile else res_bp, soglia=soglia, costo_bp=costo_bp)
+    g = guadagni(res_bp, res_bp - rumore if eseguibile else res_bp, soglia=soglia, costo_bp=costo_bp, ritardo=ritardo)
     media, t = st.newey_west(g, ritardi=10)
     return {"media_bp": media, "t": t, "std_residuo_bp": float(res_bp.std()),
             "corr_residuo_mis": float(np.corrcoef(res_bp.ravel(), mis.ravel())[0, 1]) if std_bp > 0 else np.nan}
 
 
-def potere(giorni, std_bp, emivita, rumore_bp, simulazioni, costo_bp=0.0, vero="ns", seme=0, soglia_t=2.0, tau1=None):
+def potere(giorni, std_bp, emivita, rumore_bp, simulazioni, costo_bp=0.0, vero="ns", seme=0, soglia_t=2.0, tau1=None,
+           ritardo=0, risoluzione_bp=0.0):
     """Frazione di simulazioni in cui il guadagno medio e' positivo con t di Newey-West > soglia_t,
     e guadagno medio sulle simulazioni. Con std_bp = 0 (nessun mispricing) e' la frequenza dei falsi positivi."""
-    esiti = [simula(giorni, std_bp, emivita, rumore_bp, seme + i, vero, costo_bp, tau1=tau1) for i in range(simulazioni)]
+    esiti = [simula(giorni, std_bp, emivita, rumore_bp, seme + i, vero, costo_bp, tau1=tau1, ritardo=ritardo,
+                    risoluzione_bp=risoluzione_bp) for i in range(simulazioni)]
     t = np.array([e["t"] for e in esiti])
     m = np.array([e["media_bp"] for e in esiti])
     return float(np.mean((t > soglia_t) & (m > 0))), float(m.mean())

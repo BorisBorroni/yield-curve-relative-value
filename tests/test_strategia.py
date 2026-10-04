@@ -77,3 +77,24 @@ def test_emivita_di_un_ar1():
     assert h[2500] == pytest.approx(10, rel=0.4)
     camminata = np.cumsum(rng.normal(size=300))
     assert np.isinf(sg.emivita(camminata, 250)[:250]).all()
+
+
+def test_ritardo_sposta_di_un_giorno_l_esecuzione():
+    x = np.zeros(130)
+    x[:70] = np.random.default_rng(2).normal(0, 1, 70)
+    x[100], x[101], x[102] = 8.0, 4.0, 0.0
+    g0, pos = sg.guadagni_serie(x, x, finestra=60, soglia=3.0)
+    g1, _ = sg.guadagni_serie(x, x, finestra=60, soglia=3.0, ritardo=1)
+    assert pos[100] == 1.0 and len(g1) == len(g0) - 1
+    # posizione presa al giorno 100 con x=8, aperta al giorno 101 (x=4): guadagna x_101 - x_102 = 4
+    assert g1[100] == pytest.approx(4.0)
+
+
+def test_zscore_con_finestra_costante_e_nan():
+    z = sg.zscore(np.concatenate([np.ones(70), [5.0]]), finestra=60)
+    assert np.isnan(z[:60]).all() and np.isnan(z[-1])
+
+
+def test_pesi_farfalla_scadenze_non_crescenti():
+    with pytest.raises(ValueError):
+        sg.pesi_farfalla((5, 5, 10), "fattori")

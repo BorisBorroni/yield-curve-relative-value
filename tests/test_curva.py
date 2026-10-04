@@ -160,3 +160,14 @@ def test_residui_panel_con_tau_fisso_e_regressione():
     y = np.tile(cv.rendimento_zero(n, cv.Parametri(4.0, -1.0, 1.0, 0.0, 1.37)), (3, 1))
     beta, tau, res = cv.residui_panel(y, n, tau1=1.37)
     assert np.allclose(beta, [4.0, -1.0, 1.0]) and np.allclose(tau, 1.37) and np.abs(res).max() < 1e-9
+
+
+def test_parametri_con_tau_non_positivo():
+    with pytest.raises(ValueError):
+        cv.Parametri(4.0, -1.0, 1.0, 0.0, tau1=0.0)
+
+
+def test_residui_panel_rifiuta_i_valori_mancanti():
+    y = np.array([[4.0, np.nan, 4.2, 4.3]])
+    with pytest.raises(ValueError):
+        cv.residui_panel(y, [1, 2, 5, 10])

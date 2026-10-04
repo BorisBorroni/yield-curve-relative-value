@@ -1,8 +1,8 @@
 """Curva dei rendimenti di Nelson-Siegel e Svensson.
 
 Unita': scadenze in anni, tassi in percentuale. I tassi zero sono a capitalizzazione
-CONTINUA (come SVENY della Fed); il par yield e' invece il rendimento di una cedola
-semestrale che fa valere il titolo 100 (come SVENPY): non vanno mescolati.
+continua (come SVENY della Fed); il par yield e' invece il rendimento di una cedola
+semestrale che fa valere il titolo 100 (come SVENPY): sono due cose diverse.
 
 Formula (Svensson; Nelson-Siegel e' il caso beta3 = 0):
     y(n) = b0 + b1 * A(n/t1) + b2 * (A(n/t1) - exp(-n/t1)) + b3 * (A(n/t2) - exp(-n/t2))
@@ -29,6 +29,10 @@ class Parametri:
     beta3: float = 0.0
     tau1: float = 1.0
     tau2: float = 5.0
+
+    def __post_init__(self):
+        if not (self.tau1 > 0 and self.tau2 > 0):
+            raise ValueError("tau1 e tau2 devono essere positivi")
 
     @property
     def ns(self) -> bool:
@@ -185,13 +189,15 @@ def condizionamento(scadenze, tau1: float, tau2: float | None = None) -> float:
 def residui_panel(rendimenti, scadenze, tau1: float | None = None, griglia=None):
     """Nelson-Siegel giorno per giorno su una tabella di rendimenti (righe = giorni, colonne = scadenze).
 
-    Per ogni giorno si scarta il tau (sulla griglia) che minimizza la somma dei quadrati e i beta
+    Per ogni giorno si sceglie il tau (sulla griglia) che minimizza la somma dei quadrati e i beta
     sono quelli dei minimi quadrati con quel tau. Restituisce (beta [giorni x 3], tau [giorni],
     residui [giorni x scadenze]) con residuo = osservato - curva. Le righe con valori mancanti
     non sono ammesse: chi chiama seleziona le colonne disponibili.
     """
     y = np.asarray(rendimenti, dtype=float)
     n = np.asarray(scadenze, dtype=float)
+    if np.isnan(y).any():
+        raise ValueError("residui_panel non accetta valori mancanti: seleziona prima le colonne disponibili")
     candidati = [tau1] if tau1 is not None else (griglia if griglia is not None else np.geomspace(0.3, 10, 40))
     migliore_ssr = np.full(len(y), np.inf)
     beta = np.zeros((len(y), 3))

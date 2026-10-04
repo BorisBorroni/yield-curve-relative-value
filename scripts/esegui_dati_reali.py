@@ -1,4 +1,4 @@
-"""Livello 4: dati reali. Adatta la curva ogni giorno e produce le tabelle del livello 4.
+"""Dati reali (sezione 8 del README): adatta la curva ogni giorno e produce le tabelle.
 
 Legge lo storico (data/storico/), scrive in output/: parametri e residui del fit giornaliero e le
 tabelle stampate. Il fit su circa 6500 giorni richiede 2-3 minuti.
@@ -41,6 +41,11 @@ def main():
     r = an.riepilogo(premio)
     mostra("Tesoro meno Fed (bp), per periodo", r.drop(index="intero", level=0), "premio_on_the_run")
     print("\nIntero periodo:\n", r.loc["intero"].to_string())
+    confronto = pd.DataFrame({"t con 20 ritardi": an.riepilogo(premio, ritardi=20)["t_NW"],
+                              "t con 250 ritardi": r["t_NW"]}).drop(index="intero", level=0)
+    mostra("Premio: t con 20 e con 250 ritardi di Newey-West", confronto, "premio_t_ritardi")
+    ac = pd.DataFrame({k: {c: d[c].dropna().autocorr(60) for c in d.columns} for k, d in an.periodi(premio).items()}).round(2)
+    mostra("Premio: autocorrelazione a 60 giorni", ac, "premio_autocorr60")
 
     # 2. Nelson-Siegel sui punti del Tesoro
     print("\nAdattamento giornaliero della curva (2-3 minuti)...")
@@ -57,21 +62,24 @@ def main():
            pd.DataFrame({k: np.sqrt((v**2).mean()) for k, v in an.periodi(d).items()}).T.round(2), "ns_contro_fed")
 
     # 3. PCA contro fattori
+    # le variazioni si calcolano sulla tabella con i buchi (i 30 anni mancano dal 2002 al 2006) e poi si scartano
+    # quelle con un dato mancante: altrimenti il primo giorno dopo il buco confronta due date lontane quattro anni
     completi = par_t.dropna()
-    var, punteggi, vettori = an.pca(completi.diff().dropna() * 100)
-    fattori = an.fattori_dl(completi).diff().dropna()
+    var, punteggi, vettori = an.pca(par_t.diff().dropna() * 100)
+    fattori = an.fattori_dl(completi).diff()
+    fattori = fattori[par_t.diff().notna().all(axis=1).reindex(fattori.index).fillna(False)]
     pca_t = pd.DataFrame({"varianza spiegata": var.round(3),
                           "R2 su 3 fattori NS": an.r2_su_fattori(punteggi, fattori).round(3).to_numpy()},
                          index=["PC1", "PC2", "PC3"])
-    mostra(f"PCA delle variazioni giornaliere ({len(completi)} giorni con tutte le scadenze)", pca_t, "pca")
+    mostra(f"PCA delle variazioni giornaliere ({len(punteggi)} variazioni con tutte le scadenze)", pca_t, "pca")
 
     # 4. Diebold-Li: AR(1) contro passeggiata casuale
     righe = []
     for h in (1, 6, 12):
-        rm, dm, n = an.previsione_dl(completi, h, "2010-01-01")
+        rm, dm, n, cw = an.previsione_dl(completi, h, "2010-01-01")
         riga = rm.mean().round(1).to_dict()
         righe.append({"orizzonte (mesi)": h, "previsioni": n, "RMSE medio AR(1) (bp)": riga["AR(1)"],
-                      "RMSE medio RW (bp)": riga["RW"], "t DM (>0: AR meglio)": dm})
+                      "RMSE medio RW (bp)": riga["RW"], "t DM (>0: AR meglio)": dm, "t Clark-West": cw})
     mostra("Previsione fuori campione, test dal 2010 (media delle scadenze)", pd.DataFrame(righe).set_index("orizzonte (mesi)"), "previsione_dl")
 
 

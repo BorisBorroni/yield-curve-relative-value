@@ -1,12 +1,12 @@
-"""Livello 3: mondo sintetico. Stampa e salva in output/ le tabelle di recupero, falsi positivi e potere.
+"""Mondo sintetico (sezione 7 del README). Stampa e salva in output/ le tabelle di recupero, falsi positivi,
+robustezza all'arrotondamento e potere.
 
-Parametri fissati e dichiarati: 1500 giorni (circa 6 anni), emivita del mispricing 5 giorni,
-rumore di misura 0.5 bp, 60 simulazioni per cella, soglia t di Newey-West = 2 (10 ritardi).
+Parametri: 1500 giorni (circa 6 anni), emivita del mispricing 5 giorni, rumore di misura 0.5 bp, 60 simulazioni per
+cella nelle tabelle di recupero e falsi positivi, 100 nella tabella del potere; soglia t di Newey-West = 2 (10 ritardi).
 """
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,8 +15,8 @@ sys.path.insert(0, str(ROOT / "src"))
 from yield_curve_relative_value import mondo_sintetico as ms  # noqa: E402
 
 OUT = ROOT / "output"
-GIORNI, EMIVITA, RUMORE, SIM = 1500, 5.0, 0.5, 60
-TAU_DL = 1.37  # lambda di Diebold-Li: 0.0609 per mese = 1.37 anni
+GIORNI, EMIVITA, RUMORE, SIM, SIM_POTERE = 1500, 5.0, 0.5, 60, 100
+TAU_DL = 1.37  # tau di Diebold-Li: lambda 0.0609 per mese, cioe' 1.37 anni
 
 
 def tabella_recupero():
@@ -38,30 +38,53 @@ def tabella_falsi_positivi():
     return pd.DataFrame(righe)
 
 
-def tabella_potere():
-    griglia = [0.5, 1.0, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0]
+def tabella_arrotondamento():
+    """I punti del Tesoro hanno due decimali (1 bp): il sintetico, senza arrotondamento, e' ottimista?"""
+    righe = []
+    for nome, tau in (("tau libero", None), ("tau fisso 2.0", 2.0)):
+        for ris in (0.0, 1.0):
+            fp, _ = ms.potere(GIORNI, 0.0, EMIVITA, RUMORE, SIM, costo_bp=0.25, seme=500, tau1=tau, risoluzione_bp=ris)
+            pot, _ = ms.potere(GIORNI, 1.75, EMIVITA, RUMORE, SIM_POTERE, costo_bp=0.25, seme=900, tau1=tau,
+                               risoluzione_bp=ris)
+            fp0, _ = ms.potere(GIORNI, 0.0, EMIVITA, RUMORE, SIM, costo_bp=0.0, seme=500, tau1=tau, risoluzione_bp=ris)
+            righe.append({"fit": nome, "arrotondamento (bp)": ris, "falsi positivi (costo 0)": round(fp0, 3),
+                          "falsi positivi (costo 0.25)": round(fp, 3), "potere a 1.75 bp (costo 0.25)": round(pot, 2)})
+    return pd.DataFrame(righe)
+
+
+def tabella_potere(risoluzione_bp=0.0):
+    """Potere (frazione di simulazioni con guadagno medio > 0 e t > 2) per mispricing, costo, fit ed esecuzione.
+    Con risoluzione_bp = 1 i rendimenti sintetici sono arrotondati a 1 bp come i punti del Tesoro."""
+    griglia = [0.1, 0.25, 0.5, 1.0, 1.5, 1.75, 2.0, 2.5, 3.0, 3.25, 3.5, 4.0, 5.0]
     righe = []
     for s in griglia:
         riga = {"mispricing dev.std (bp)": s}
-        for costo in (0.0, 0.25, 0.5):
-            p, m = ms.potere(GIORNI, s, EMIVITA, RUMORE, SIM, costo_bp=costo, seme=900)
-            riga[f"potere costo {costo}"] = round(p, 2)
-            riga[f"guadagno costo {costo}"] = round(m, 4)
+        for fit, tau in (("libero", None), ("tau fisso", 2.0)):
+            for ritardo in (0, 1):
+                for costo in (0.0, 0.25, 0.5):
+                    if fit == "libero" and ritardo == 1:
+                        continue
+                    p, _ = ms.potere(GIORNI, s, EMIVITA, RUMORE, SIM_POTERE, costo_bp=costo, seme=900, tau1=tau,
+                                     ritardo=ritardo, risoluzione_bp=risoluzione_bp)
+                    riga[f"{fit}, {'giorno dopo' if ritardo else 'stesso giorno'}, costo {costo}"] = round(p, 2)
         righe.append(riga)
-    return pd.DataFrame(righe)
+    return pd.DataFrame(righe).set_index("mispricing dev.std (bp)")
 
 
 def main():
     OUT.mkdir(exist_ok=True)
-    rec, fp, pot = tabella_recupero(), tabella_falsi_positivi(), tabella_potere()
-    for nome, t in (("recupero", rec), ("falsi_positivi", fp), ("potere", pot)):
+    rec, fp, arr = tabella_recupero(), tabella_falsi_positivi(), tabella_arrotondamento()
+    pot, pot_arr = tabella_potere(), tabella_potere(risoluzione_bp=1.0)
+    for nome, t in (("recupero", rec), ("falsi_positivi", fp), ("arrotondamento", arr), ("potere", pot),
+                    ("potere_arrotondato", pot_arr)):
         print(f"\n== {nome} ==")
         print(t.to_string())
         t.to_csv(OUT / f"sintetico_{nome}.csv")
-    for costo in (0.0, 0.25, 0.5):
-        ok = pot[pot[f"potere costo {costo}"] >= 0.8]["mispricing dev.std (bp)"]
-        minimo = ok.min() if len(ok) else np.nan
-        print(f"Mispricing minimo rilevabile (potere >= 0.8), costo {costo} bp: {minimo} bp")
+    for titolo, t in (("senza arrotondamento", pot), ("con arrotondamento a 1 bp", pot_arr)):
+        print(f"\nMispricing minimo rilevabile (potere >= 0.8), {titolo}: primo punto della griglia che lo raggiunge")
+        for col in t.columns:
+            ok = t.index[t[col] >= 0.8]
+            print(f"  {col}: {ok.min() if len(ok) else 'nessuno'} bp")
 
 
 if __name__ == "__main__":

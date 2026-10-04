@@ -6,8 +6,6 @@ lo storico e' fisso e versionato. Per rigenerarlo, cancella la cartella data/sto
 import sys
 from pathlib import Path
 
-import requests
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
@@ -19,6 +17,8 @@ def main():
     if (cartella / "cmt.csv").exists() and (cartella / "gsw.csv").exists():
         print("Storico gia' presente in", cartella)
         return
+    import requests
+
     sc = dati.Scaricatore()
     try:
         cmt = dati.scarica_cmt(sc, range(2000, 2026))

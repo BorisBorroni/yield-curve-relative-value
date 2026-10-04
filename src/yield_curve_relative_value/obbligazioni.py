@@ -77,7 +77,7 @@ def prezzo_pulito(rendimento: float, cedola: float, scadenza: date, regolamento:
 
 
 def rendimento(prezzo: float, cedola: float, scadenza: date, regolamento: date, pulito: bool = True) -> float:
-    """Rendimento a scadenza (% annuo, semestrale) dato il prezzo. Metodo di bisezione/Brent."""
+    """Rendimento a scadenza (% annuo, semestrale) dato il prezzo. Metodo di Brent."""
     sporco = prezzo + rateo(cedola, scadenza, regolamento) if pulito else prezzo
 
     def errore(y: float) -> float:

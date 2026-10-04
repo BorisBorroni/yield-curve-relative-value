@@ -3,7 +3,6 @@
 Fonti:
 - punti a scadenza costante (par yield) del Tesoro USA, un CSV per anno;
 - curva Fed di Gurkaynak-Sack-Wright (GSW), un unico CSV;
-- aste e riacquisti del Tesoro (FiscalData), API aperta.
 
 Prima di ogni richiesta si legge il robots.txt dell'host: se vieta, non si scarica.
 Il progetto tiene in data/storico/ uno storico fisso e piccolo (fino alla fine del 2025);
@@ -16,7 +15,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
-import numpy as np
 import pandas as pd
 
 UA = "yield-curve-relative-value/0.1 (progetto universitario)"
@@ -25,8 +23,6 @@ URL_CMT = ("https://home.treasury.gov/resource-center/data-chart-center/interest
            "daily-treasury-rates.csv/{a}/all?type=daily_treasury_yield_curve"
            "&field_tdr_date_value={a}&page&_format=csv")
 URL_GSW = "https://www.federalreserve.gov/data/yield-curve-tables/feds200628.csv"
-FISCAL = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/od/"
-URL_XML_RIACQUISTI = "https://fiscaldata.treasury.gov/static-data/published-reports/buybacks/result/"
 
 # scadenze (anni) usate nell'analisi, e fine dello storico versionato
 SCADENZE = (1, 2, 3, 5, 7, 10, 20, 30)
@@ -155,11 +151,3 @@ def par_gsw(gsw: pd.DataFrame, scadenze=SCADENZE, zero: bool = False) -> pd.Data
     pref = "SVENY" if zero else "SVENPY"
     return pd.DataFrame({k: gsw[f"{pref}{k:02d}"] for k in scadenze}).astype(float)
 
-
-def giorni_comuni(a: pd.DataFrame, b: pd.DataFrame) -> pd.DatetimeIndex:
-    return a.dropna(how="all").index.intersection(b.dropna(how="all").index)
-
-
-def senza_valori_mancanti(df: pd.DataFrame) -> pd.DataFrame:
-    """Righe complete (nessun NaN): serve a PCA e regressioni."""
-    return df.replace([np.inf, -np.inf], np.nan).dropna()

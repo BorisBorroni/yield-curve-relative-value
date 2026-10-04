@@ -80,5 +80,16 @@ def _panel_mean_reverting(anni=20, seed=3):
 
 @pytest.mark.slow
 def test_previsione_dl_ar1_batte_la_passeggiata_con_fattori_che_tornano_alla_media():
-    rmse, dm, n = an.previsione_dl(_panel_mean_reverting(), 1, "2008-01-01")
-    assert (rmse["AR(1)"] < rmse["RW"]).all() and dm > 2 and n > 100
+    rmse, dm, n, cw = an.previsione_dl(_panel_mean_reverting(), 1, "2008-01-01")
+    # t di Diebold-Mariano: mediana 3.4 su 60 semi diversi, minimo 1.8; il seme fisso lo rende deterministico
+    assert (rmse["AR(1)"] < rmse["RW"]).all() and dm > 1.5 and cw > 1.645 and n > 100
+
+
+def test_previsione_dl_non_attraversa_i_buchi():
+    """Con un buco di quattro anni nei dati nessuna coppia (beta_s, beta_{s+h}) lo attraversa."""
+    par = _panel_mean_reverting()
+    senza_buco = par.copy()
+    par.loc["2008-01-01":"2011-12-31"] = np.nan
+    rmse, dm, n, _ = an.previsione_dl(par, 1, "2005-01-01")
+    _, _, n_pieno, _ = an.previsione_dl(senza_buco, 1, "2005-01-01")
+    assert n < n_pieno and np.isfinite(dm) and (rmse > 0).all().all()

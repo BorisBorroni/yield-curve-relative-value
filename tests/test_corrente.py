@@ -20,6 +20,10 @@ def test_percentile():
     assert co.percentile(-0.5, [np.nan, 0.1, 1.0]) == pytest.approx(50.0)
 
 
+def test_percentile_di_un_valore_mancante():
+    assert np.isnan(co.percentile(float("nan"), [1.0, 2.0]))
+
+
 def test_zscore_esclude_il_giorno_corrente():
     x = np.random.default_rng(0).normal(size=80)
     z = sg.zscore(x, 30)

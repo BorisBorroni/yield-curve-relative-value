@@ -62,7 +62,7 @@ def main():
     t.to_csv(OUT / "corrente_residui.csv")
     ff.to_csv(OUT / "corrente_farfalle.csv")
     print("\nLettura: |z| alto non e' un segnale operativo. Nello storico i guadagni di questo segnale"
-          " spariscono con costi di circa 0.2 bp (vedi esegui_strategia.py).")
+          " delle farfalle spariscono con costi fra 0.04 e 0.2 bp (vedi esegui_strategia.py).")
 
 
 if __name__ == "__main__":

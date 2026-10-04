@@ -1,7 +1,7 @@
-"""Analisi sui dati reali (livello 4): adattamento giornaliero, premio on-the-run, PCA, previsione.
+"""Analisi sui dati reali: adattamento giornaliero, premio on-the-run, PCA, previsione.
 
 Tutti i rendimenti sono par yield in %, le differenze in punti base (bp).
-Due sottoperiodi dichiarati fin dall'inizio: il Tesoro ha cambiato metodo di costruzione della
+Due sottoperiodi: il Tesoro ha cambiato metodo di costruzione della
 curva il 6 dicembre 2021 (spline quasi-cubico prima, monotone convex dopo).
 """
 import numpy as np
@@ -11,8 +11,8 @@ from . import curva as cv
 from . import statistica as st
 
 CAMBIO_METODO = pd.Timestamp("2021-12-06")
-TAU_DL = 1.37  # lambda di Diebold-Li (0.0609 per mese) espresso in anni
-RITARDI_NW = 20
+TAU_DL = 1.37  # tau di Diebold-Li: lambda 0.0609 per mese, cioe' 1.37 anni
+RITARDI_NW = 250  # circa un anno di borsa: le serie dei premi hanno autocorrelazione alta anche a 60 giorni
 
 
 def adatta_serie(par: pd.DataFrame, svensson: bool = False):
@@ -24,9 +24,12 @@ def adatta_serie(par: pd.DataFrame, svensson: bool = False):
     """
     n = par.columns.to_numpy(dtype=float)
     righe, res = [], []
-    for _, riga in par.iterrows():
+    for giorno, riga in par.iterrows():
         y = riga.to_numpy(dtype=float)
-        p = cv.adatta_par_yield(n, y, svensson=svensson)
+        try:
+            p = cv.adatta_par_yield(n, y, svensson=svensson)
+        except ValueError as e:
+            raise ValueError(f"{giorno.date()}: {e}") from e
         righe.append([p.beta0, p.beta1, p.beta2, p.beta3, p.tau1, p.tau2])
         res.append((y - cv.par_yield_vettore(n, p)) * 100)  # NaN dove il dato manca
     parametri = pd.DataFrame(righe, index=par.index, columns=["beta0", "beta1", "beta2", "beta3", "tau1", "tau2"])
@@ -52,18 +55,19 @@ def periodi(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
             "intero": df}
 
 
-def riepilogo(diff_bp: pd.DataFrame) -> pd.DataFrame:
+def riepilogo(diff_bp: pd.DataFrame, ritardi: int = RITARDI_NW) -> pd.DataFrame:
     """Per scadenza e periodo: media, mediana, dev. std (bp), t di Newey-West della media, n giorni.
 
-    Le serie sono molto persistenti (autocorrelazione vicina a 1): il t ordinario sarebbe troppo
-    ottimista, per questo Newey-West con 20 ritardi. I p-value non sono corretti per test multipli."""
+    Le serie sono molto persistenti (autocorrelazione a 60 giorni fra 0.5 e 0.93): il t ordinario sarebbe
+    troppo ottimista e anche venti ritardi di Newey-West sono pochi, per questo si usano 250 ritardi
+    (prudente: su 1017 giorni, il sottoperiodo piu' corto, tende a sottostimare il t). I p-value non sono corretti per test multipli."""
     righe = []
     for nome, d in periodi(diff_bp).items():
         for c in d.columns:
             x = d[c].dropna()
             if len(x) < 50:
                 continue
-            m, t = st.newey_west(x.to_numpy(), RITARDI_NW)
+            m, t = st.newey_west(x.to_numpy(), ritardi)
             righe.append({"periodo": nome, "scadenza": c, "media": m, "mediana": x.median(),
                           "dev_std": x.std(), "t_NW": t, "giorni": len(x)})
     return pd.DataFrame(righe).set_index(["periodo", "scadenza"]).round(2)
@@ -103,29 +107,44 @@ def fattori_dl(par: pd.DataFrame, tau: float = TAU_DL) -> pd.DataFrame:
 def previsione_dl(par: pd.DataFrame, orizzonte: int, inizio_test: str, tau: float = TAU_DL):
     """Previsione fuori campione a `orizzonte` mesi: AR(1) sui beta contro passeggiata casuale.
 
-    Si usa l'ultimo giorno di ogni mese. Per ogni mese t dell'insieme di test, l'AR(1) diretto
-    beta_{t+h} = a + phi beta_t si stima sui soli dati disponibili fino a t (finestra espansiva, le
-    coppie con arrivo <= t). Passeggiata casuale: beta_{t+h} previsto = beta_t.
+    Si usa l'ultimo giorno di ogni mese, su un calendario mensile completo: un mese senza dati (come gli anni
+    2002-2006, senza i 30 anni) resta vuoto e nessuna coppia (beta_s, beta_{s+h}) lo attraversa. Per ogni
+    mese t dell'insieme di test, l'AR(1) diretto beta_{t+h} = a + phi beta_t si stima sulle sole coppie
+    disponibili con s + h <= t (finestra espansiva). Passeggiata casuale: beta_{t+h} previsto = beta_t.
     Restituisce (rmse in bp per scadenza dei due metodi, t di Diebold-Mariano con Newey-West
-    sulla perdita quadratica media fra le scadenze).
+    sulla perdita quadratica media fra le scadenze, numero di previsioni, t di Clark-West).
+
+    L'AR(1) contiene la passeggiata casuale come caso particolare (a = 0, phi = 1): fra modelli annidati il t
+    di Diebold-Mariano non e' normale nemmeno asintoticamente, e Clark-West corregge la perdita dell'AR(1)
+    per il rumore di stima. Si rifiuta la passeggiata casuale al 5% (una coda) se il t di Clark-West supera 1.645.
     """
-    mensile = par.dropna().groupby(par.dropna().index.to_period("M")).tail(1)
-    beta = fattori_dl(mensile, tau)
+    pieno = par.dropna()
+    ultimo = pieno.groupby(pieno.index.to_period("M")).tail(1)
+    ultimo.index = ultimo.index.to_period("M")
+    mensile = ultimo.reindex(pd.period_range(ultimo.index[0], ultimo.index[-1], freq="M"))
+    ok = mensile.notna().all(axis=1).to_numpy()
+    b = np.full((len(mensile), 3), np.nan)
+    b[ok] = fattori_dl(mensile[ok], tau).to_numpy()
     x = cv.carichi(par.columns.to_numpy(dtype=float), tau)
-    b = beta.to_numpy()
     y = mensile.to_numpy()
-    t0 = int(np.searchsorted(mensile.index, pd.Timestamp(inizio_test)))
+    t0 = int(mensile.index.searchsorted(pd.Period(inizio_test, freq="M")))
     err_ar, err_rw = [], []
     for t in range(t0, len(b) - orizzonte):
+        if not (ok[t] and ok[t + orizzonte]):
+            continue
         prev = np.empty(3)
         for j in range(3):
             xs, ys = b[: t + 1 - orizzonte, j], b[orizzonte : t + 1, j]  # coppie (beta_s, beta_{s+h}) con s+h <= t
-            phi, a = np.polyfit(xs, ys, 1)
+            valide = ~np.isnan(xs) & ~np.isnan(ys)
+            phi, a = np.polyfit(xs[valide], ys[valide], 1)
             prev[j] = a + phi * b[t, j]
         err_ar.append((y[t + orizzonte] - x @ prev) * 100)
         err_rw.append((y[t + orizzonte] - x @ b[t]) * 100)
     ea, er = np.array(err_ar), np.array(err_rw)
     rmse = pd.DataFrame({"AR(1)": np.sqrt((ea**2).mean(axis=0)), "RW": np.sqrt((er**2).mean(axis=0))}, index=par.columns)
     perdita = (er**2).mean(axis=1) - (ea**2).mean(axis=1)  # > 0 se l'AR(1) sbaglia meno
-    _, dm = st.newey_west(perdita, max(orizzonte, 1) - 1 + 2)
-    return rmse.round(1), round(dm, 2), len(ea)
+    ritardi = max(orizzonte, 1) - 1 + 2
+    _, dm = st.newey_west(perdita, ritardi)
+    clark_west = (er**2 - (ea**2 - (er - ea) ** 2)).mean(axis=1)
+    _, cw = st.newey_west(clark_west, ritardi)
+    return rmse.round(1), round(dm, 2), len(ea), round(cw, 2)

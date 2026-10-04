@@ -1,4 +1,4 @@
-"""Grafici del progetto (matplotlib). Colori e stile: un solo asse, linee sottili, etichette dirette."""
+"""Grafici del progetto (matplotlib). Colori e stile: un solo asse, linee, etichette dirette."""
 import matplotlib
 
 matplotlib.use("Agg")
@@ -10,7 +10,7 @@ from . import analisi as an  # noqa: E402
 from . import strategia as sg  # noqa: E402
 
 SFONDO, INCHIOSTRO, SECONDARIO, GRIGLIA = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
-COLORI = ["#2a78d6", "#eb6834", "#4a3aa7"]  # blu, arancione, viola (primi colori della palette validata)
+COLORI = ["#2a78d6", "#eb6834", "#4a3aa7"]  # blu, arancione, viola 
 
 
 def _stile(ax, titolo, ylabel):
@@ -27,14 +27,13 @@ def _stile(ax, titolo, ylabel):
             color=SECONDARIO, fontsize=8, va="top", ha="left")
 
 
-def _etichette(ax, serie, colori):
+def _etichette(ax, serie):
     """Etichetta diretta all'estremo destro di ogni linea e legenda in basso."""
     ax.legend(loc="lower left", frameon=False, fontsize=9, labelcolor=SECONDARIO)
-    for (nome, s), c in zip(serie, colori, strict=True):
+    for nome, s in serie:
         s = s.dropna()
         ax.annotate(nome, (s.index[-1], s.iloc[-1]), xytext=(6, 0), textcoords="offset points",
                     color=INCHIOSTRO, fontsize=9, va="center")
-        ax.plot([], [], color=c)
 
 
 def grafico_premio(premio_bp: pd.DataFrame, scadenze=(10, 20, 30), finestra: int = 250):
@@ -48,32 +47,32 @@ def grafico_premio(premio_bp: pd.DataFrame, scadenze=(10, 20, 30), finestra: int
     ax.axhline(0, color=SECONDARIO, linewidth=0.8)
     ax.set_ylim(min(-25, np.nanmin([s.min() for _, s in serie]) - 2), max(10, np.nanmax([s.max() for _, s in serie]) + 2))
     _stile(ax, "Tesoro meno curva Fed (media mobile di un anno)", "punti base")
-    _etichette(ax, serie, COLORI)
+    _etichette(ax, serie)
     ax.set_xlim(premio_bp.index[0], premio_bp.index[-1] + pd.Timedelta(days=500))
     fig.tight_layout()
     return fig
 
 
-def guadagni_cumulati(x: pd.Series, somma_pesi: float, costi=(0.0, 0.25, 0.5)) -> pd.DataFrame:
-    """Guadagno cumulato (bp) della regola z-score su una serie, per diversi costi."""
+def guadagni_cumulati(x: pd.Series, somma_pesi: float, casi=((0.0, 0), (0.0, 1), (0.25, 1))) -> pd.DataFrame:
+    """Guadagno cumulato (bp) per ogni caso (costo in bp, ritardo di esecuzione in giorni)."""
     out = {}
-    for c in costi:
-        g, _ = sg.guadagni_serie(x.to_numpy(), x.to_numpy(), somma_pesi, 60, 1.0, c)
-        out[c] = pd.Series(g, index=x.index[1:]).cumsum()
+    for costo, ritardo in casi:
+        g, _ = sg.guadagni_serie(x.to_numpy(), x.to_numpy(), somma_pesi, 60, 1.0, costo, ritardo=ritardo)
+        nome = ("lordo" if costo == 0 else f"costo {costo:g} bp") + (", giorno dopo" if ritardo else ", stesso giorno")
+        out[nome] = pd.Series(g, index=x.index[1 + ritardo :]).cumsum()
     return pd.DataFrame(out)
 
 
 def grafico_guadagni(cum: pd.DataFrame, titolo: str):
-    """Guadagno cumulato per costo: senza costi la regola sembra funzionare, con costi realistici no."""
+    """Guadagno cumulato: lordo allo stesso prezzo del segnale, lordo il giorno dopo, e con un costo di 0.25 bp."""
     fig, ax = plt.subplots(figsize=(8, 4.2), facecolor=SFONDO)
     serie = []
     for c, col in zip(cum.columns, COLORI, strict=False):
-        nome = f"costo {c:g} bp"
-        ax.plot(cum.index, cum[c], color=col, linewidth=1.8, label=nome)
-        serie.append((nome, cum[c]))
+        ax.plot(cum.index, cum[c], color=col, linewidth=1.8, label=c)
+        serie.append((c, cum[c]))
     ax.axhline(0, color=SECONDARIO, linewidth=0.8)
     _stile(ax, titolo, "punti base cumulati")
-    _etichette(ax, serie, COLORI)
+    _etichette(ax, serie)
     ax.set_xlim(cum.index[0], cum.index[-1] + pd.Timedelta(days=700))
     fig.tight_layout()
     return fig
