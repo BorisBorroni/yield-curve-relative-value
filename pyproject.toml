@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yield-curve-relative-value"
+version = "0.1.0"
+description = "Calibrazione e validazione di Nelson-Siegel e valore relativo sulla curva dei Treasury USA"
+requires-python = ">=3.10"
+dependencies = ["numpy", "pandas", "scipy"]
+
+[project.optional-dependencies]
+dati = ["requests"]
+notebook = ["matplotlib", "nbformat", "nbclient", "ipykernel"]
+dev = ["pytest", "pytest-cov", "ruff==0.16.8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
