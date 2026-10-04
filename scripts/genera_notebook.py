@@ -39,7 +39,10 @@ sys.path.insert(0, str(RADICE / "src"))
 
 import numpy as np
 import pandas as pd
-from IPython.display import display
+from io import BytesIO
+
+import matplotlib.pyplot as plt
+from IPython.display import Image, display
 
 from yield_curve_relative_value import analisi as an
 from yield_curve_relative_value import dati, grafici
@@ -48,6 +51,16 @@ from yield_curve_relative_value import obbligazioni as ob
 from yield_curve_relative_value import strategia as sg
 
 pd.set_option("display.width", 150)
+
+
+def mostra(fig):
+    # mostra il grafico come immagine PNG incorporata nel notebook
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
+    plt.close(fig)
+    display(Image(data=buf.getvalue()))
+
+
 cmt, gsw = dati.carica_storico()
 par_t = dati.par_cmt(cmt).dropna(how="all")
 par_f = dati.par_gsw(gsw)
@@ -119,7 +132,7 @@ ritardi, perche' le serie sono molto persistenti.
     codice("""
 premio = an.differenza_bp(par_t, par_f)
 display(an.riepilogo(premio).drop(index="intero", level=0))
-display(grafici.grafico_premio(premio))
+mostra(grafici.grafico_premio(premio))
 """),
     md("""
 ## 5. Nelson-Siegel sui punti del Tesoro
@@ -183,7 +196,7 @@ for neutr in ("dv01", "fattori"):
     if neutr == "dv01":
         cum = grafici.guadagni_cumulati(x, abs(w).sum())
 display(pd.DataFrame(righe).set_index(["neutralita", "esecuzione", "costo (bp)"]))
-display(grafici.grafico_guadagni(cum, "Farfalla 2-5-10: guadagno cumulato della regola z-score"))
+mostra(grafici.grafico_guadagni(cum, "Farfalla 2-5-10: guadagno cumulato della regola z-score"))
 """),
     md("""
 ## 8. La curva di oggi
