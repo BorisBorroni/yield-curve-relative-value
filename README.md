@@ -22,7 +22,7 @@ La domanda a cui voglio rispondere e': quando un punto della curva sta sopra o s
 
 ## 1. Risultato in breve
 
-- Le mie formule di Nelson-Siegel/Svensson riproducono zero, forward e par yield pubblicati dalla Fed con uno scarto massimo di 0.00005 punti percentuali, cioe' l'arrotondamento dei dati.
+- Le formule di Nelson-Siegel/Svensson riproducono zero, forward e par yield pubblicati dalla Fed con uno scarto massimo di 0.00005 punti percentuali, cioe' l'arrotondamento dei dati.
 - I punti del Tesoro hanno rendimenti piu' bassi della curva Fed: i titoli appena emessi sono piu' cari. Il premio e' statisticamente netto, cambia nel tempo e a 10 anni vale in media -10 bp (sezione 8).
 - Il residuo di Nelson-Siegel sui punti del Tesoro e' di 2.5-3.6 bp fino a 7 anni e 6-9 bp a 10-30 anni, ed e' molto persistente (autocorrelazione a un giorno 0.91-0.99): e' in gran parte errore di forma del modello, non mispricing che rientra.
 - Una regola di ritorno alla media sui residui e sulle farfalle guadagna al lordo, ma il guadagno si azzera con un costo di circa 0.2 bp per unita' di DV01 su ogni gamba. Con costo 0.25 bp sette strategie su otto sono negative. Non ho trovato un vantaggio eseguibile.
